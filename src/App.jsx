@@ -27,6 +27,7 @@ export default function App() {
   const onRoute = useCallback((r) => setRoute(r), [])
 
   useEffect(() => { if (isMobile && route) setOpen(true) }, [route, isMobile])
+  useEffect(() => { if (route) setSelected(null) }, [route])   // ruta y línea son excluyentes
 
   const sel = {
     width: '100%', marginTop: 6, padding: '10px 12px', borderRadius: 8,
@@ -67,7 +68,11 @@ export default function App() {
         const isSel = selected === s.ref
         return (
           <div key={s.ref}
-            onClick={() => { setSelected(isSel ? null : s.ref); if (isMobile) setOpen(false) }}
+            onClick={() => {
+              setSelected(isSel ? null : s.ref)
+              setOrigin(''); setDest('')          // limpia la ruta
+              if (isMobile) setOpen(false)
+            }}
             style={{
               padding: '10px 12px', marginBottom: 5, borderRadius: 8, cursor: 'pointer',
               background: isSel ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.02)',
