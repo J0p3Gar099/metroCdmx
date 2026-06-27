@@ -127,22 +127,32 @@ export default function MetroMap({ url, selected, origin, dest, onMeta, onRoute 
         for (let j = i + 1; j < idxs.length; j++) addEdge(idxs[i], idxs[j], 0, TRANSFER_MIN)
     })
 
-    // labels de distancia + transbordos + stats (igual que antes)
+    // labels de distancia entre estaciones consecutivas
     const distLabels = []
     Object.values(byLi).forEach(idxs => {
       idxs.sort((a, b) => stations[a].arc - stations[b].arc)
       for (let i = 0; i < idxs.length - 1; i++) {
-        const a = stations[idxs[i]], b = stations[idxs[i + 1]], d = b.arc - a.arc
+        const ia = idxs[i], ib = idxs[i + 1]
+        const a = stations[ia], b = stations[ib], d = b.arc - a.arc
         if (d < 50) continue
-        distLabels.push({ pos: [(a.pos[0] + b.pos[0]) / 2, a.pos[1] + 0.3, (a.pos[2] + b.pos[2]) / 2], text: fmt(d) })
+        distLabels.push({
+          pos: [(a.pos[0] + b.pos[0]) / 2, a.pos[1] + 0.3, (a.pos[2] + b.pos[2]) / 2],
+          text: fmt(d),
+          ref: a.ref,
+          pair: [ia, ib],
+        })
       }
     })
+
+    // conectores de transbordo
     const transfers = []
     Object.values(byName).forEach(idxs => {
       if (idxs.length < 2) return
       const arr = idxs.map(i => stations[i]).sort((a, b) => a.pos[1] - b.pos[1])
       for (let i = 0; i < arr.length - 1; i++) transfers.push({ pts: [arr[i].pos, arr[i + 1].pos] })
     })
+
+    // stats por línea
     const statMap = {}
     stations.forEach(s => { (statMap[s.ref] ||= { ref: s.ref, color: s.color, names: new Set() }).names.add(s.name) })
     lines.forEach(l => { const st = statMap[l.ref]; if (st) st.total = Math.max(st.total || 0, l.cum.at(-1) || 0) })
@@ -158,7 +168,7 @@ export default function MetroMap({ url, selected, origin, dest, onMeta, onRoute 
     if (built) onMeta?.({ stats: built.stats, names: built.names })
   }, [built, onMeta])
 
-  // cálculo de ruta (Dijkstra por tiempo)
+  // ruta más rápida (Dijkstra por tiempo)
   const route = useMemo(() => {
     if (!built || !origin || !dest || origin === dest) return null
     const { stations, adj } = built
@@ -186,7 +196,6 @@ export default function MetroMap({ url, selected, origin, dest, onMeta, onRoute 
     const path = []
     for (let u = goal; u !== -1; u = prev[u]) path.unshift(u)
 
-    // pasos: agrupa por línea, detecta transbordos
     const steps = []
     let cur = null
     path.forEach(idx => {
@@ -207,7 +216,6 @@ export default function MetroMap({ url, selected, origin, dest, onMeta, onRoute 
   const pathSet = new Set(route?.path || [])
   const dimLine = (ref) => routeActive ? 0.1 : (selected && selected !== ref ? 0.08 : 1)
 
-  // segmentos resaltados de la ruta
   const routeSegs = []
   if (route) for (let i = 0; i < route.path.length - 1; i++) {
     const a = stations[route.path[i]], b = stations[route.path[i + 1]]
@@ -216,16 +224,22 @@ export default function MetroMap({ url, selected, origin, dest, onMeta, onRoute 
 
   return (
     <group>
+      {/* conectores de transbordo */}
       {transfers.map((t, i) => (
         <Line key={'t' + i} points={t.pts} color="#ffffff" lineWidth={1.5} transparent opacity={routeActive ? 0.1 : 0.25} />
       ))}
+
+      {/* líneas */}
       {lines.map((l, i) => (
         <Line key={i} points={l.pts} color={l.color} lineWidth={4} transparent opacity={dimLine(l.ref)} />
       ))}
+
+      {/* ruta resaltada */}
       {routeSegs.map((s, i) => (
         <Line key={'r' + i} points={s.pts} color={s.color} lineWidth={8} />
       ))}
 
+      {/* estaciones */}
       {stations.map((s, i) => {
         if (routeActive ? !pathSet.has(i) : (selected && selected !== s.ref)) return null
         return (
@@ -239,11 +253,21 @@ export default function MetroMap({ url, selected, origin, dest, onMeta, onRoute 
         )
       })}
 
-      {!routeActive && distLabels.map((d, i) => (
-        <Billboard key={'d' + i} position={d.pos}>
-          <Text fontSize={0.55} color="#9fb8c8" anchorX="center" anchorY="middle" outlineWidth={0.04} outlineColor="#0a0e14">{d.text}</Text>
-        </Billboard>
-      ))}
+      {/* distancias */}
+      {distLabels.map((d, i) => {
+        if (routeActive) {
+          const arr = route.path
+          const pi = arr.indexOf(d.pair[0]), qi = arr.indexOf(d.pair[1])
+          if (pi === -1 || qi === -1 || Math.abs(pi - qi) !== 1) return null
+        } else if (selected && selected !== d.ref) {
+          return null
+        }
+        return (
+          <Billboard key={'d' + i} position={d.pos}>
+            <Text fontSize={0.55} color="#9fb8c8" anchorX="center" anchorY="middle" outlineWidth={0.04} outlineColor="#0a0e14">{d.text}</Text>
+          </Billboard>
+        )
+      })}
     </group>
   )
 }

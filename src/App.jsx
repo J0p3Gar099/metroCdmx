@@ -21,12 +21,11 @@ export default function App() {
   const [origin, setOrigin] = useState('')
   const [dest, setDest] = useState('')
   const [route, setRoute] = useState(null)
-  const [open, setOpen] = useState(false)   // panel abierto en móvil
+  const [open, setOpen] = useState(false)
 
   const onMeta = useCallback((m) => setMeta(m), [])
   const onRoute = useCallback((r) => setRoute(r), [])
 
-  // al calcular una ruta en móvil, sube el panel solo
   useEffect(() => { if (isMobile && route) setOpen(true) }, [route, isMobile])
 
   const sel = {
@@ -67,11 +66,13 @@ export default function App() {
       {meta.stats.map(s => {
         const isSel = selected === s.ref
         return (
-          <div key={s.ref} onClick={() => setSelected(isSel ? null : s.ref)} style={{
-            padding: '10px 12px', marginBottom: 5, borderRadius: 8, cursor: 'pointer',
-            background: isSel ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.02)',
-            borderLeft: `4px solid ${s.color}`,
-          }}>
+          <div key={s.ref}
+            onClick={() => { setSelected(isSel ? null : s.ref); if (isMobile) setOpen(false) }}
+            style={{
+              padding: '10px 12px', marginBottom: 5, borderRadius: 8, cursor: 'pointer',
+              background: isSel ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.02)',
+              borderLeft: `4px solid ${s.color}`,
+            }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 15 }}>
               <span style={{ width: 12, height: 12, borderRadius: '50%', background: s.color }} /> Línea {s.ref}
             </div>
@@ -85,7 +86,6 @@ export default function App() {
 
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden' }}>
-      {/* MAPA a pantalla completa */}
       <Canvas camera={{ position: [0, 90, 90], fov: 50 }} style={{ background: '#0a0e14', position: 'absolute', inset: 0 }}>
         <ambientLight intensity={0.8} />
         <directionalLight position={[50, 100, 50]} intensity={1} />
@@ -93,7 +93,6 @@ export default function App() {
         <OrbitControls enableDamping enablePan screenSpacePanning panSpeed={1.5} />
       </Canvas>
 
-      {/* ESCRITORIO: panel lateral fijo */}
       {!isMobile && (
         <aside style={{
           position: 'absolute', top: 0, left: 0, bottom: 0, width: 280,
@@ -105,7 +104,6 @@ export default function App() {
         </aside>
       )}
 
-      {/* MÓVIL: botón + bottom sheet */}
       {isMobile && (
         <>
           {!open && (
