@@ -1,0 +1,4 @@
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; overflow: hidden; }
+body { overscroll-behavior: none; }
+canvas { touch-action: none; }   /* evita que el scroll de la página pelee con el gesto 3D */
