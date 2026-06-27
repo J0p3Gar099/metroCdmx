@@ -24870,24 +24870,7 @@
     ]
   }
 },
-{
-  "type": "Feature",
-  "id": "node/4593462357",
-  "properties": {
-    "construction:railway": "station",
-    "name": "Valentín Campa",
-    "station": "subway",
-    "subway": "yes",
-    "id": "node/4593462357"
-  },
-  "geometry": {
-    "type": "Point",
-    "coordinates": [
-      -99.2003437,
-      19.3822384
-    ]
-  }
-},
+
 
 {
   "type": "Feature",
@@ -27091,24 +27074,7 @@
 },
 
 
-{
-  "type": "Feature",
-  "id": "node/12606344296",
-  "properties": {
-    "construction:railway": "station",
-    "name": "Valentín Campa",
-    "station": "subway",
-    "subway": "yes",
-    "id": "node/12606344296"
-  },
-  "geometry": {
-    "type": "Point",
-    "coordinates": [
-      -99.2002985,
-      19.3822241
-    ]
-  }
-},
+
 {
   "type": "Feature",
   "id": "node/12606344847",
