@@ -24524,25 +24524,7 @@
     ]
   }
 },
-{
-  "type": "Feature",
-  "id": "node/3035158576",
-  "properties": {
-    "name": "Viveros de Coyoacán",
-    "network": "Linea 3",
-    "public_transport": "stop_position",
-    "railway": "stop",
-    "subway": "yes",
-    "id": "node/3035158576"
-  },
-  "geometry": {
-    "type": "Point",
-    "coordinates": [
-      -99.1731807,
-      19.3564746
-    ]
-  }
-},
+
 {
   "type": "Feature",
   "id": "node/3179076843",
