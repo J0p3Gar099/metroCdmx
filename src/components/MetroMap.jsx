@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Line, Billboard, Text } from '@react-three/drei'
 
-const ORDER = ['1','2','3','4','5','6','7','8','9','A','B','12']
 const TRANSFER_MIN = 5
+const CBB_TRANSFER_MIN = 6   // transbordo metro<->cable suele ser más largo
 
-// "Metro Línea B" -> "B", "Metro Línea L12" -> "12", "Metro Línea 8" -> "8"
-function refFromNombre(nombre = '') {
+const SYSTEMS = [
+  { key: 'METRO', label: 'Metro', est: '/data/metro_estaciones.geojson', lin: '/data/metro_lineas.geojson', yBase: 0,  order: ['1','2','3','4','5','6','7','8','9','A','B','12'] },
+  { key: 'CBB',   label: 'Cablebús', est: '/data/cbb_estaciones.geojson', lin: '/data/cbb_lineas.geojson', yBase: 14, order: ['1','2','3'] },
+]
+
+function refNum(nombre = '') {
   const m = nombre.match(/L[íi]nea\s+L?([0-9AB]+)/i)
   return m ? m[1].toUpperCase() : ''
 }
-// num_comercial de estación: "L12" -> "12", "8" -> "8", "A" -> "A"
-function refFromComercial(nc = '') {
+function comercialNum(nc = '') {
   return nc.toString().replace(/^L/i, '').toUpperCase()
 }
 
@@ -24,7 +27,6 @@ function haversine([lon1, lat1], [lon2, lat2]) {
   return 2 * R * Math.asin(Math.sqrt(a))
 }
 
-// une segmentos sueltos en una sola polilínea continua, encadenando por extremos cercanos
 function chainSegments(segs) {
   if (!segs.length) return []
   const used = new Array(segs.length).fill(false)
@@ -76,77 +78,95 @@ function makeProjector(allCoords) {
 const fmt = (m) => m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m / 10) * 10} m`
 
 export default function MetroMap({ selected, origin, dest, onMeta, onRoute }) {
-  const [estData, setEstData] = useState(null)
-  const [linData, setLinData] = useState(null)
+  const [datasets, setDatasets] = useState(null)
 
   useEffect(() => {
-    fetch('/data/estaciones.geojson').then(r => r.json()).then(setEstData).catch(console.error)
-    fetch('/data/lineas.geojson').then(r => r.json()).then(setLinData).catch(console.error)
+    Promise.all(SYSTEMS.map(async sys => {
+      const [est, lin] = await Promise.all([
+        fetch(sys.est).then(r => r.json()),
+        fetch(sys.lin).then(r => r.json()),
+      ])
+      return { sys, est, lin }
+    })).then(setDatasets).catch(console.error)
   }, [])
 
   const built = useMemo(() => {
-    if (!estData || !linData) return null
+    if (!datasets) return null
 
-    // proyector con TODAS las coords válidas (líneas + estaciones)
+    // proyector global con coords de TODOS los sistemas
     const allCoords = []
-    linData.features.forEach(f => {
-      if (f.geometry?.type === 'MultiLineString')
-        f.geometry.coordinates.forEach(seg => seg.forEach(p => { if (valid(p)) allCoords.push(p) }))
+    datasets.forEach(({ lin, est }) => {
+      lin.features.forEach(f => {
+        if (f.geometry?.type === 'MultiLineString')
+          f.geometry.coordinates.forEach(seg => seg.forEach(p => { if (valid(p)) allCoords.push(p) }))
+      })
+      est.features.forEach(f => { const c = f.geometry?.coordinates; if (valid(c)) allCoords.push(c) })
     })
-    estData.features.forEach(f => { const c = f.geometry?.coordinates; if (valid(c)) allCoords.push(c) })
     if (!allCoords.length) return null
     const project = makeProjector(allCoords)
 
-    // LÍNEAS: una por ref (me quedo con el primer sentido que aparezca)
-    const lines = [], yByRef = {}, metaByRef = {}, polyByRef = {}
-    linData.features.forEach(f => {
-      const p = f.properties || {}
-      const ref = refFromNombre(p.nombre_linea)
-      if (!ref || f.geometry?.type !== 'MultiLineString') return
-      if (metaByRef[ref]) return   // ya tengo un sentido de esta línea, ignoro el otro
+    const lines = [], metaById = {}, polyById = {}, stations = []
 
-      const color = '#' + (p.color_esp || '888888')
-      if (yByRef[ref] === undefined) yByRef[ref] = Object.keys(yByRef).length * 0.8
-      const y = yByRef[ref]
-      metaByRef[ref] = {
-        ref, color, y,
-        freq: p.frecuencia_minutos || 5,
-        speed: (p.velocidad_promedio_kmh || 35) * 1000 / 60,  // m/min
-        dist: p.distancia_metros || 0,
-      }
+    datasets.forEach(({ sys, lin, est }) => {
+      const yByRef = {}
+      const drawnSegs = {}
 
-      // polilínea ordenada: encadeno los segmentos por proximidad de extremos
-      const segs = f.geometry.coordinates
-        .map(s => s.filter(valid))
-        .filter(s => s.length >= 2)
-      polyByRef[ref] = chainSegments(segs)
+      // LÍNEAS del sistema
+      lin.features.forEach(f => {
+        const p = f.properties || {}
+        const num = refNum(p.nombre_linea)
+        if (!num || f.geometry?.type !== 'MultiLineString') return
+        const id = `${sys.key}-${num}`
 
-      // trazos para dibujar (cada segmento tal cual)
-      segs.forEach(seg => {
-        const pts = seg.map(c => { const [x, z] = project(c); return [x, y, z] })
-        if (pts.length >= 2) lines.push({ ref, color, y, pts })
+        const color = '#' + (p.color_esp || '888888')
+        const segs = f.geometry.coordinates.map(s => s.filter(valid)).filter(s => s.length >= 2)
+
+        if (!metaById[id]) {
+          if (yByRef[num] === undefined) yByRef[num] = sys.yBase + Object.keys(yByRef).length * 0.8
+          metaById[id] = {
+            id, num, sysKey: sys.key, sysLabel: sys.label, color, y: yByRef[num],
+            freq: p.frecuencia_minutos || 5,
+            speed: (p.velocidad_promedio_kmh || 30) * 1000 / 60,
+            dist: p.distancia_metros || 0,
+          }
+          polyById[id] = chainSegments(segs)
+          drawnSegs[id] = new Set()
+        }
+        const y = metaById[id].y
+
+        // dibujo cada segmento físico una sola vez (evita tronco duplicado en la "Y")
+        segs.forEach(seg => {
+          const a = seg[0], b = seg[seg.length - 1]
+          const ka = `${a[0].toFixed(5)},${a[1].toFixed(5)}`
+          const kb = `${b[0].toFixed(5)},${b[1].toFixed(5)}`
+          const key = ka < kb ? ka + '|' + kb : kb + '|' + ka
+          if (drawnSegs[id].has(key)) return
+          drawnSegs[id].add(key)
+          const pts = seg.map(c => { const [x, z] = project(c); return [x, y, z] })
+          if (pts.length >= 2) lines.push({ id, color, y, pts })
+        })
+      })
+
+      // ESTACIONES del sistema
+      est.features.forEach(f => {
+        const p = f.properties || {}
+        const num = comercialNum(p.num_comercial)
+        const id = `${sys.key}-${num}`
+        const m = metaById[id]
+        if (!m) return
+        const c = f.geometry?.coordinates
+        if (!valid(c)) return
+        const [x, z] = project(c)
+        stations.push({
+          pos: [x, m.y + 0.15, z], name: p.nombre, color: m.color, id,
+          num, sysKey: sys.key, lon: c[0], lat: c[1],
+        })
       })
     })
 
-    // ESTACIONES: directo del GeoJSON (cada una sabe su línea por num_comercial)
-    const stations = []
-    estData.features.forEach(f => {
-      const p = f.properties || {}
-      const ref = refFromComercial(p.num_comercial)
-      const m = metaByRef[ref]
-      if (!m) return
-      const c = f.geometry?.coordinates
-      if (!valid(c)) return
-      const [x, z] = project(c)
-      stations.push({
-        pos: [x, m.y + 0.15, z], name: p.nombre, color: m.color, ref,
-        lon: c[0], lat: c[1],
-      })
-    })
-
-    // arc = distancia acumulada (m) sobre la polilínea continua -> ordena estaciones según el trazo real
-    const arcOnPoly = (ref, lon, lat) => {
-      const poly = polyByRef[ref]
+    // arc por línea (para ordenar etiquetas de distancia)
+    const arcOnPoly = (id, lon, lat) => {
+      const poly = polyById[id]
       if (!poly || poly.length < 2) return 0
       let bestArc = 0, dMin = Infinity, acc = 0
       for (let i = 0; i < poly.length - 1; i++) {
@@ -163,48 +183,90 @@ export default function MetroMap({ selected, origin, dest, onMeta, onRoute }) {
       }
       return bestArc
     }
-    stations.forEach(s => { s.arc = arcOnPoly(s.ref, s.lon, s.lat) })
+    stations.forEach(s => { s.arc = arcOnPoly(s.id, s.lon, s.lat) })
 
     // grafo
     const adj = stations.map(() => [])
     const addEdge = (a, b, meters, minutes) => {
       adj[a].push({ to: b, meters, minutes }); adj[b].push({ to: a, meters, minutes })
     }
-    const byRef = {}
-    stations.forEach((s, i) => { (byRef[s.ref] ||= []).push(i) })
-    Object.entries(byRef).forEach(([ref, idxs]) => {
-      const speed = metaByRef[ref].speed
-      idxs.sort((a, b) => stations[a].arc - stations[b].arc)
-      for (let i = 0; i < idxs.length - 1; i++) {
-        const a = idxs[i], b = idxs[i + 1]
-        const meters = haversine([stations[a].lon, stations[a].lat], [stations[b].lon, stations[b].lat])
-        addEdge(a, b, meters, meters / speed)
-      }
+
+    // conecto estaciones siguiendo CADA ramal (feature) por separado -> respeta las "Y"
+    datasets.forEach(({ sys, lin }) => {
+      lin.features.forEach(f => {
+        const p = f.properties || {}
+        const num = refNum(p.nombre_linea)
+        if (!num) return
+        const id = `${sys.key}-${num}`
+        const meta = metaById[id]
+        if (!meta) return
+        const segs = f.geometry.coordinates.map(s => s.filter(valid)).filter(s => s.length >= 2)
+        const poly = chainSegments(segs)
+        if (poly.length < 2) return
+
+        const cum = [0]
+        for (let i = 1; i < poly.length; i++) cum[i] = cum[i - 1] + haversine(poly[i - 1], poly[i])
+
+        const projOnThis = (lon, lat) => {
+          let bestArc = 0, dMin = Infinity
+          for (let i = 0; i < poly.length - 1; i++) {
+            const a = poly[i], b = poly[i + 1]
+            const dx = b[0] - a[0], dy = b[1] - a[1]
+            const len2 = dx * dx + dy * dy || 1e-12
+            let t = ((lon - a[0]) * dx + (lat - a[1]) * dy) / len2
+            t = Math.max(0, Math.min(1, t))
+            const cx = a[0] + dx * t, cy = a[1] + dy * t
+            const d = (cx - lon) ** 2 + (cy - lat) ** 2
+            if (d < dMin) { dMin = d; bestArc = cum[i] + t * (cum[i + 1] - cum[i]) }
+          }
+          return { arc: bestArc, d: Math.sqrt(dMin) }
+        }
+
+        const onRamal = stations
+          .map((s, i) => ({ i, s }))
+          .filter(({ s }) => s.id === id)
+          .map(({ i, s }) => ({ i, ...projOnThis(s.lon, s.lat) }))
+          .filter(o => o.d < 0.003)   // ~300m: descarta estaciones de la otra rama
+          .sort((a, b) => a.arc - b.arc)
+
+        for (let i = 0; i < onRamal.length - 1; i++) {
+          const a = onRamal[i].i, b = onRamal[i + 1].i
+          const meters = haversine([stations[a].lon, stations[a].lat], [stations[b].lon, stations[b].lat])
+          if (meters > 3000) continue
+          addEdge(a, b, meters, meters / meta.speed)
+        }
+      })
     })
+
+    // transbordos por nombre (incluye cruces Metro<->Cablebús)
     const byName = {}
     stations.forEach((s, i) => { (byName[s.name] ||= []).push(i) })
     Object.values(byName).forEach(idxs => {
       for (let i = 0; i < idxs.length; i++)
-        for (let j = i + 1; j < idxs.length; j++) addEdge(idxs[i], idxs[j], 0, TRANSFER_MIN)
+        for (let j = i + 1; j < idxs.length; j++) {
+          const cross = stations[idxs[i]].sysKey !== stations[idxs[j]].sysKey
+          addEdge(idxs[i], idxs[j], 0, cross ? CBB_TRANSFER_MIN : TRANSFER_MIN)
+        }
     })
 
-    // distancias entre estaciones consecutivas
+    // distancias entre consecutivas (por id, ordenadas por arc)
+    const byId = {}
+    stations.forEach((s, i) => { (byId[s.id] ||= []).push(i) })
     const distLabels = []
-    Object.entries(byRef).forEach(([ref, idxs]) => {
+    Object.entries(byId).forEach(([id, idxs]) => {
       idxs.sort((a, b) => stations[a].arc - stations[b].arc)
       for (let i = 0; i < idxs.length - 1; i++) {
-        const ia = idxs[i], ib = idxs[i + 1]
-        const a = stations[ia], b = stations[ib]
+        const a = stations[idxs[i]], b = stations[idxs[i + 1]]
         const d = haversine([a.lon, a.lat], [b.lon, b.lat])
-        if (d < 50) continue
+        if (d < 50 || d > 3000) continue
         distLabels.push({
           pos: [(a.pos[0] + b.pos[0]) / 2, a.pos[1] + 0.3, (a.pos[2] + b.pos[2]) / 2],
-          text: fmt(d), ref, pair: [ia, ib],
+          text: fmt(d), id, pair: [idxs[i], idxs[i + 1]],
         })
       }
     })
 
-    // conectores de transbordo
+    // conectores de transbordo (visual)
     const transfers = []
     Object.values(byName).forEach(idxs => {
       if (idxs.length < 2) return
@@ -212,22 +274,26 @@ export default function MetroMap({ selected, origin, dest, onMeta, onRoute }) {
       for (let i = 0; i < arr.length - 1; i++) transfers.push({ pts: [arr[i].pos, arr[i + 1].pos] })
     })
 
-    // stats por línea (datos oficiales)
-    const stats = Object.values(metaByRef).map(m => ({
-      ref: m.ref, color: m.color,
-      count: (byRef[m.ref] || []).length,
-      dist: fmt(m.dist),
-      time: Math.round(m.dist / m.speed),
-      freq: m.freq,
-    })).sort((a, b) => ORDER.indexOf(a.ref) - ORDER.indexOf(b.ref))
+    // stats agrupados por sistema
+    const groups = SYSTEMS.map(sys => ({
+      key: sys.key, label: sys.label,
+      lines: Object.values(metaById)
+        .filter(m => m.sysKey === sys.key)
+        .map(m => ({
+          id: m.id, num: m.num, color: m.color,
+          count: (byId[m.id] || []).length,
+          dist: fmt(m.dist), time: Math.round(m.dist / m.speed), freq: m.freq,
+        }))
+        .sort((a, b) => sys.order.indexOf(a.num) - sys.order.indexOf(b.num)),
+    })).filter(g => g.lines.length)
 
     const names = [...new Set(stations.map(s => s.name))].sort((a, b) => a.localeCompare(b))
-    return { lines, stations, adj, distLabels, transfers, stats, names }
-  }, [estData, linData])
+    return { lines, stations, adj, distLabels, transfers, groups, names }
+  }, [datasets])
 
-  useEffect(() => { if (built) onMeta?.({ stats: built.stats, names: built.names }) }, [built, onMeta])
+  useEffect(() => { if (built) onMeta?.({ groups: built.groups, names: built.names }) }, [built, onMeta])
 
-  // ruta más rápida (Dijkstra por tiempo)
+  // ruta más rápida
   const route = useMemo(() => {
     if (!built || !origin || !dest || origin === dest) return null
     const { stations, adj } = built
@@ -257,8 +323,10 @@ export default function MetroMap({ selected, origin, dest, onMeta, onRoute }) {
     let cur = null
     path.forEach(idx => {
       const s = stations[idx]
-      if (!cur || cur.ref !== s.ref) { cur = { ref: s.ref, color: s.color, from: s.name, to: s.name, count: 1 }; steps.push(cur) }
-      else { cur.to = s.name; cur.count++ }
+      if (!cur || cur.id !== s.id) {
+        cur = { id: s.id, num: s.num, sysKey: s.sysKey, color: s.color, from: s.name, to: s.name, count: 1 }
+        steps.push(cur)
+      } else { cur.to = s.name; cur.count++ }
     })
     return { path, steps, minutes: Math.round(dist[goal]), meters: meters[goal] }
   }, [built, origin, dest])
@@ -269,12 +337,12 @@ export default function MetroMap({ selected, origin, dest, onMeta, onRoute }) {
   const { lines, stations, distLabels, transfers } = built
   const routeActive = !!route
   const pathSet = new Set(route?.path || [])
-  const dimLine = (ref) => routeActive ? 0.1 : (selected && selected !== ref ? 0.08 : 1)
+  const dimLine = (id) => routeActive ? 0.1 : (selected && selected !== id ? 0.08 : 1)
 
   const routeSegs = []
   if (route) for (let i = 0; i < route.path.length - 1; i++) {
     const a = stations[route.path[i]], b = stations[route.path[i + 1]]
-    routeSegs.push({ pts: [a.pos, b.pos], color: a.ref === b.ref ? a.color : '#ffffff' })
+    routeSegs.push({ pts: [a.pos, b.pos], color: a.id === b.id ? a.color : '#ffffff' })
   }
 
   return (
@@ -283,13 +351,13 @@ export default function MetroMap({ selected, origin, dest, onMeta, onRoute }) {
         <Line key={'t' + i} points={t.pts} color="#ffffff" lineWidth={1.5} transparent opacity={routeActive ? 0.1 : 0.25} />
       ))}
       {lines.map((l, i) => (
-        <Line key={i} points={l.pts} color={l.color} lineWidth={4} transparent opacity={dimLine(l.ref)} />
+        <Line key={i} points={l.pts} color={l.color} lineWidth={4} transparent opacity={dimLine(l.id)} />
       ))}
       {routeSegs.map((s, i) => (
         <Line key={'r' + i} points={s.pts} color={s.color} lineWidth={8} />
       ))}
       {stations.map((s, i) => {
-        if (routeActive ? !pathSet.has(i) : (selected && selected !== s.ref)) return null
+        if (routeActive ? !pathSet.has(i) : (selected && selected !== s.id)) return null
         return (
           <group key={i} position={s.pos}>
             <mesh><sphereGeometry args={[0.4, 12, 12]} />
@@ -305,7 +373,7 @@ export default function MetroMap({ selected, origin, dest, onMeta, onRoute }) {
           const arr = route.path
           const pi = arr.indexOf(d.pair[0]), qi = arr.indexOf(d.pair[1])
           if (pi === -1 || qi === -1 || Math.abs(pi - qi) !== 1) return null
-        } else if (selected && selected !== d.ref) return null
+        } else if (selected && selected !== d.id) return null
         return (
           <Billboard key={'d' + i} position={d.pos}>
             <Text fontSize={0.55} color="#9fb8c8" anchorX="center" anchorY="middle" outlineWidth={0.04} outlineColor="#0a0e14">{d.text}</Text>

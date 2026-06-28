@@ -16,8 +16,8 @@ function useIsMobile() {
 
 export default function App() {
   const isMobile = useIsMobile()
-  const [selected, setSelected] = useState(null)
-  const [meta, setMeta] = useState({ stats: [], names: [] })
+  const [selected, setSelected] = useState(null)   // ahora es el id "METRO-3" / "CBB-1"
+  const [meta, setMeta] = useState({ groups: [], names: [] })
   const [origin, setOrigin] = useState('')
   const [dest, setDest] = useState('')
   const [route, setRoute] = useState(null)
@@ -27,7 +27,7 @@ export default function App() {
   const onRoute = useCallback((r) => setRoute(r), [])
 
   useEffect(() => { if (isMobile && route) setOpen(true) }, [route, isMobile])
-  useEffect(() => { if (route) setSelected(null) }, [route])   // ruta y línea son excluyentes
+  useEffect(() => { if (route) setSelected(null) }, [route])
 
   const sel = {
     width: '100%', marginTop: 6, padding: '10px 12px', borderRadius: 8,
@@ -54,7 +54,7 @@ export default function App() {
               {i > 0 && <div style={{ color: '#66ffff', margin: '4px 0' }}>↕ Transbordo en {s.from}</div>}
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ width: 11, height: 11, borderRadius: '50%', background: s.color, flexShrink: 0 }} />
-                <span>L{s.ref}: {s.from} → {s.to} <span style={{ color: '#5f7b8a' }}>({s.count} est.)</span></span>
+                <span>{s.sysKey === 'CBB' ? 'Cablebús L' : 'L'}{s.num}: {s.from} → {s.to} <span style={{ color: '#5f7b8a' }}>({s.count} est.)</span></span>
               </div>
             </div>
           ))}
@@ -63,29 +63,29 @@ export default function App() {
         </div>
       )}
 
-      <div style={{ fontSize: 13, fontWeight: 600, color: '#66ffff', margin: '18px 0 6px' }}>Líneas</div>
-      {meta.stats.map(s => {
-        const isSel = selected === s.ref
-        return (
-          <div key={s.ref}
-            onClick={() => {
-              setSelected(isSel ? null : s.ref)
-              setOrigin(''); setDest('')          // limpia la ruta
-              if (isMobile) setOpen(false)
-            }}
-            style={{
-              padding: '10px 12px', marginBottom: 5, borderRadius: 8, cursor: 'pointer',
-              background: isSel ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.02)',
-              borderLeft: `4px solid ${s.color}`,
-            }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 15 }}>
-              <span style={{ width: 12, height: 12, borderRadius: '50%', background: s.color }} /> Línea {s.ref}
-            </div>
-            {isSel && <div style={{ fontSize: 13, color: '#9fb8c8', lineHeight: 1.7, paddingLeft: 20, marginTop: 5 }}>
-              {s.count} estaciones<br />{s.dist} de recorrido<br />~{s.time} min</div>}
-          </div>
-        )
-      })}
+      {meta.groups.map(g => (
+        <div key={g.key}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#66ffff', margin: '18px 0 6px' }}>{g.label}</div>
+          {g.lines.map(s => {
+            const isSel = selected === s.id
+            return (
+              <div key={s.id}
+                onClick={() => { setSelected(isSel ? null : s.id); setOrigin(''); setDest(''); if (isMobile) setOpen(false) }}
+                style={{
+                  padding: '10px 12px', marginBottom: 5, borderRadius: 8, cursor: 'pointer',
+                  background: isSel ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.02)',
+                  borderLeft: `4px solid ${s.color}`,
+                }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 15 }}>
+                  <span style={{ width: 12, height: 12, borderRadius: '50%', background: s.color }} /> Línea {s.num}
+                </div>
+                {isSel && <div style={{ fontSize: 13, color: '#9fb8c8', lineHeight: 1.7, paddingLeft: 20, marginTop: 5 }}>
+                  {s.count} estaciones<br />{s.dist} de recorrido<br />~{s.time} min punta a punta<br />🚇 tren cada ~{s.freq} min</div>}
+              </div>
+            )
+          })}
+        </div>
+      ))}
     </div>
   )
 
@@ -104,7 +104,7 @@ export default function App() {
           background: '#0d1219', borderRight: '1px solid #1f3a44', color: '#e0f7ff',
           fontFamily: 'system-ui, sans-serif', padding: 16, overflowY: 'auto',
         }}>
-          <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 14 }}>Metro CDMX</div>
+          <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 14 }}>Movilidad CDMX</div>
           {Panel}
         </aside>
       )}
@@ -121,7 +121,6 @@ export default function App() {
               {route ? `Ruta ~${route.minutes} min` : '🔍 Buscar ruta'}
             </button>
           )}
-
           <div style={{
             position: 'absolute', left: 0, right: 0, bottom: 0,
             maxHeight: '70vh', transform: open ? 'translateY(0)' : 'translateY(100%)',
@@ -131,12 +130,9 @@ export default function App() {
             padding: '8px 16px calc(20px + env(safe-area-inset-bottom))', overflowY: 'auto',
             boxShadow: '0 -6px 24px rgba(0,0,0,0.5)',
           }}>
-            <div onClick={() => setOpen(false)} style={{
-              width: 44, height: 5, borderRadius: 3, background: '#3a5560',
-              margin: '6px auto 14px', cursor: 'pointer',
-            }} />
+            <div onClick={() => setOpen(false)} style={{ width: 44, height: 5, borderRadius: 3, background: '#3a5560', margin: '6px auto 14px', cursor: 'pointer' }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <div style={{ fontSize: 17, fontWeight: 700 }}>Metro CDMX</div>
+              <div style={{ fontSize: 17, fontWeight: 700 }}>Movilidad CDMX</div>
               <div onClick={() => setOpen(false)} style={{ fontSize: 20, color: '#66ffff', cursor: 'pointer', padding: 4 }}>✕</div>
             </div>
             {Panel}
