@@ -94,7 +94,7 @@ export default function App() {
       <Canvas camera={{ position: [0, 90, 90], fov: 50 }} style={{ background: '#0a0e14', position: 'absolute', inset: 0 }}>
         <ambientLight intensity={0.8} />
         <directionalLight position={[50, 100, 50]} intensity={1} />
-        <MetroMap url="/data/metro.geojson" selected={selected} origin={origin} dest={dest} onMeta={onMeta} onRoute={onRoute} />
+        <MetroMap selected={selected} origin={origin} dest={dest} onMeta={onMeta} onRoute={onRoute} />
         <OrbitControls enableDamping enablePan screenSpacePanning panSpeed={1.5} />
       </Canvas>
 
